@@ -1,22 +1,27 @@
+
 use serde::{Serialize, Deserialize};
 
 use crate::contracts;
 use crate::types::TxRef;
 use crate::TransactionStatus;
+use crate::contracts::AccountIdWrapper;
 
-/// HelloWorld contract states.
+use crate::std::collections::BTreeMap;
+use crate::std::string::String;
+
+/// SecretNote contract states.
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct HelloWorld {
-    counter: u32,
+pub struct SecretNote {
+    notes: BTreeMap<AccountIdWrapper, String>,
 }
 
 /// The commands that the contract accepts from the blockchain. Also called transactions.
 /// Commands are supposed to update the states of the contract.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Command {
-    /// Increments the counter in the contract by some number
-    Increment {
-        value: u32,
+    /// Set the note for current user
+    SetNote {
+        note: String,
     },
 }
 
@@ -24,47 +29,48 @@ pub enum Command {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Error {
     NotAuthorized,
-    SomeOtherError,
 }
 
 /// Query requests. The end users can only query the contract states by sending requests.
 /// Queries are not supposed to write to the contract states.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
-    /// Ask for the value of the counter
-    GetCount,
+    /// Read the note for current user
+    GetNote,
 }
 
 /// Query responses.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Response {
-    /// Returns the value of the counter
-    GetCount {
-        count: u32,
+    /// Return the note for current user
+    GetNote {
+        note: String,
     },
     /// Something wrong happened
     Error(Error)
 }
 
 
-impl HelloWorld {
+impl SecretNote {
     /// Initializes the contract
     pub fn new() -> Self {
         Default::default()
     }
 }
 
-impl contracts::Contract<Command, Request, Response> for HelloWorld {
+impl contracts::Contract<Command, Request, Response> for SecretNote {
     // Returns the contract id
-    fn id(&self) -> contracts::ContractId { contracts::HELLO_WORLD }
+    fn id(&self) -> contracts::ContractId { contracts::SECRET_NOTE }
 
     // Handles the commands from transactions on the blockchain. This method doesn't respond.
-    fn handle_command(&mut self, _origin: &chain::AccountId, _txref: &TxRef, cmd: Command) -> TransactionStatus {
+    fn handle_command(&mut self, origin: &chain::AccountId, _txref: &TxRef, cmd: Command) -> TransactionStatus {
         match cmd {
-            // Handle the `Increment` command with one parameter
-            Command::Increment { value } => {
-                // Simply increment the counter by some value.
-                self.counter += value;
+            // Handle the `SetNote` command with one parameter
+            Command::SetNote { note } => {
+                // Simply increment the counter by some value
+                let current_user = AccountIdWrapper(origin.clone());
+                // Insert the note, we only keep the latest note
+                self.notes.insert(current_user, note);
                 // Returns TransactionStatus::Ok to indicate a successful transaction
                 TransactionStatus::Ok
             },
@@ -72,13 +78,23 @@ impl contracts::Contract<Command, Request, Response> for HelloWorld {
     }
 
     // Handles a direct query and responds to the query. It shouldn't modify the contract states.
-    fn handle_query(&mut self, _origin: Option<&chain::AccountId>, req: Request) -> Response {
+    fn handle_query(&mut self, origin: Option<&chain::AccountId>, req: Request) -> Response {
         let inner = || -> Result<Response, Error> {
             match req {
-                // Hanlde the `GetCount` request.
-                Request::GetCount => {
-                    // Respond with the counter in the contract states.
-                    Ok(Response::GetCount { count: self.counter })
+                // Handle the `GetNote` request
+                Request::GetNote => {
+                    // Unwrap the current user account
+                    if let Some(account) = origin {
+                        let current_user = AccountIdWrapper(account.clone());
+                        if self.notes.contains_key(&current_user) {
+                            // Respond with the note in the notes
+                            let note = self.notes.get(&current_user);
+                            return Ok(Response::GetNote { note: note.unwrap().clone() })
+                        }
+                    }
+
+                    // Respond NotAuthorized when no account is specified
+                    Err(Error::NotAuthorized)
                 },
             }
         };
